@@ -13,9 +13,18 @@ import models.tarifas
 import models.simulcao
 from routers import regiao
 from schemas.simulacao import SimulacaoCreate   
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+import os
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
+
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+@app.get("/")
+def home():
+    return FileResponse("static/index.html")
 
 def get_db():
     db = SessionLocal()
@@ -135,3 +144,11 @@ def criar_simulacao(dados:SimulacaoCreate,db: Session = Depends(get_db)):
             "regiao" : usuario.regiao
         }
     }
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=int(os.environ.get("PORT", 8000))
+    )
