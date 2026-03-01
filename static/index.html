@@ -264,7 +264,7 @@ input:focus{
   background:rgba(0,0,0,.35);border:1px solid var(--border);
   border-radius:10px;padding:.9rem;position:relative;overflow:hidden;
 }
-.kpi::before{content:'';position:absolute;top:0;left:0;bottom:0;width:2px;background:var(--teal);}
+.kpi::before{content:'';position:absolute;top:0;left:0;bottom:0;width:2px;background:var(--teal);border-radius:0 3px 3px 0;}
 .kpi.gold::before{background:var(--gold);}
 .kpi-label{font-family:'Space Mono',monospace;font-size:.55rem;color:var(--muted);letter-spacing:2px;text-transform:uppercase;margin-bottom:.25rem;}
 .kpi-val{font-family:'Orbitron',monospace;font-size:1.4rem;font-weight:700;letter-spacing:1px;color:var(--white);}
@@ -819,7 +819,6 @@ async function cadastrar(){
     const r=await fetch(`${API}/usuarios`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nome,email,senha,cidade})});
     if(!r.ok){const e=await r.json().catch(()=>({}));throw new Error(e.detail||'Erro ao criar conta.');}
     const d=await r.json();
-    /* Login automático após cadastro */
     currentUser=d.usuario??d;
     sessionStorage.setItem('avUser',JSON.stringify(currentUser));
     setupDash();await loadConsumos();
@@ -911,7 +910,8 @@ async function confirmarDelete(){
   try{
     const r=await fetch(`${API}/consumos/${delId}`,{method:'DELETE'});
     if(!r.ok){const e=await r.json().catch(()=>({}));throw new Error(e.detail||'erro ao excluir');}
-    consumos=consumos.filter(c=>c.id!==delId);renderConsumos();
+    // ── FIX: recarrega do servidor para garantir sincronismo ──
+    await loadConsumos();
     if($('panelG').classList.contains('visible')){destroyCharts();buildCharts();}
     closeConfirm();toast('// registro excluído');
   }catch(e){toast(e.message,'error');}finally{loading(false);}
@@ -931,6 +931,7 @@ function selectTipo(el){
   document.querySelectorAll('.tipo-btn').forEach(b=>b.classList.remove('selected'));
   el.classList.add('selected');tipoSel=el.dataset.tipo;showErr('err-tipo',false);
 }
+
 async function registrarConsumo(){
   const gasto=parseFloat($('m-gasto').value),data=$('m-data').value;
   let ok=true;
@@ -942,10 +943,13 @@ async function registrarConsumo(){
   try{
     const r=await fetch(`${API}/consumos`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tipo:tipoSel,gasto,data,usuario_id:currentUser.id})});
     if(!r.ok){const e=await r.json().catch(()=>({}));throw new Error(e.detail||'erro ao salvar');}
-    const novo=await r.json();
-    consumos.push(novo);renderConsumos();
+
+    // ── FIX: recarrega a lista completa do servidor em vez de push manual ──
+    await loadConsumos();
+
     if($('panelG').classList.contains('visible')){destroyCharts();buildCharts();}
-    closeModal();toast('// consumo registrado ✦');
+    closeModal();
+    toast('// consumo registrado ✦');
   }catch(e){toast(e.message,'error');}finally{loading(false);}
 }
 
@@ -975,7 +979,6 @@ async function executarSimulacao(){
   if(!ok)return;
 
   const isAgua=simTipo==='Agua';
-  /* Conversão: se for água, usuário digita litros → enviar em m³ para API */
   const consumoParaAPI=isAgua ? +(litros/1000).toFixed(6) : litros;
 
   const payload={atividade,tipo:simTipo,consumo_valor:consumoParaAPI.toString(),usuario_id:currentUser.id};
@@ -990,7 +993,6 @@ async function executarSimulacao(){
     const d=await r.json();
     const res=d.resultado;
     $('resVal').textContent=parseFloat(res.total).toFixed(2).replace('.',',');
-    /* Detalhe mostra litros (exibição) e m³ (enviado) para transparência */
     $('resDetail').innerHTML=
       `<strong>${atividade}</strong><br>`+
       (isAgua
@@ -999,7 +1001,6 @@ async function executarSimulacao(){
     $('resTarifa').textContent=`R$ ${parseFloat(res.valor_unitario).toFixed(4).replace('.',',')}${isAgua?' /m³':' /kWh'}`;
     $('resRegiao').textContent=res.regiao;
     $('simResult').style.display='';
-    /* Salva litros no histórico local para exibição, mas m³ foi o que foi calculado */
     simulacoes.unshift({atividade,tipo:simTipo,consumo_litros:isAgua?litros:null,consumo_valor:consumoParaAPI,valor_calculado:res.total,regiao:res.regiao,ts:new Date()});
     sessionStorage.setItem('avSims_'+currentUser.id, JSON.stringify(simulacoes));
     renderSimHist();
@@ -1012,7 +1013,6 @@ function renderSimHist(){
   $('simHistWrap').style.display='flex';
   $('shCount').textContent=`${simulacoes.length} registro${simulacoes.length>1?'s':''}`;
 
-  // Lista de itens
   $('shList').innerHTML=simulacoes.map((s,i)=>{
     const isAgua=s.tipo==='Agua';
     return `<div class="sh-item" style="animation-delay:${i*.05}s">
@@ -1025,12 +1025,11 @@ function renderSimHist(){
     </div>`;
   }).join('');
 
-  // Gráfico de barras
   destroySimChart();
-  const labels = [...simulacoes].reverse().map((s,i)=> s.atividade.length>14 ? s.atividade.slice(0,13)+'…' : s.atividade);
-  const values = [...simulacoes].reverse().map(s=>parseFloat(s.valor_calculado));
-  const colors = [...simulacoes].reverse().map(s=>s.tipo==='Agua'?'rgba(0,229,200,.85)':'rgba(255,215,0,.85)');
-  const borders= [...simulacoes].reverse().map(s=>s.tipo==='Agua'?'#00e5c8':'#ffd700');
+  const labels=[...simulacoes].reverse().map(s=>s.atividade.length>14?s.atividade.slice(0,13)+'…':s.atividade);
+  const values=[...simulacoes].reverse().map(s=>parseFloat(s.valor_calculado));
+  const colors=[...simulacoes].reverse().map(s=>s.tipo==='Agua'?'rgba(0,229,200,.85)':'rgba(255,215,0,.85)');
+  const borders=[...simulacoes].reverse().map(s=>s.tipo==='Agua'?'#00e5c8':'#ffd700');
 
   const ctx=$('chartSim').getContext('2d');
   chartSim=new Chart(ctx,{
@@ -1059,7 +1058,6 @@ function renderSimHist(){
           bodyFont:{family:"'Space Mono',monospace",size:11},
           callbacks:{
             title:items=>{
-              const idx=[...simulacoes].length-1-items[0].dataIndex;
               return simulacoes[[...simulacoes].length-1-items[0].dataIndex]?.atividade||items[0].label;
             },
             label:item=>'  '+fmtBRL(item.parsed.y)
